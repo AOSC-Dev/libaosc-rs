@@ -1,2 +1,3 @@
 # libaosc-rs
-AOSC Rust useful library
+
+Common Rust components for AOSC projects.
