@@ -7,7 +7,7 @@ use thiserror::Error;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 const USER_AGENT: &str = "aosc";
-const DEFAULT_MIRROR: &str = "https://repo.aosc.io";
+const DEFAULT_MIRROR: &str = "https://repo.aosc.io/debs";
 
 #[cfg(feature = "async")]
 pub struct FetchPackagesAsync {
