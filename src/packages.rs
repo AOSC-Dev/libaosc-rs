@@ -1,10 +1,12 @@
-use std::path::{Path, PathBuf};
-
-use async_compression::tokio::write::XzDecoder;
 use oma_debcontrol::Field;
 use reqwest::Client;
+use std::{
+    io::{Cursor, Read, Write},
+    path::{Path, PathBuf},
+};
 use thiserror::Error;
-use tokio::io::{AsyncWrite, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
+use xz2::read::XzDecoder;
 
 const USER_AGENT: &str = "aosc";
 const DEFAULT_MIRROR: &str = "https://repo.aosc.io/debs";
@@ -72,16 +74,20 @@ impl FetchPackagesAsync {
 
         let mut f = tokio::fs::File::create(dir.join("Packages")).await?;
 
-        let mut writer: Box<dyn AsyncWrite + Unpin + Send> = if self.download_compress {
-            Box::new(XzDecoder::new(&mut f))
+        let bytes = resp.bytes().await?.to_vec();
+        let decompressed = if self.download_compress {
+            let mut cursor = Cursor::new(&bytes);
+            let mut decoder = XzDecoder::new(&mut cursor);
+            let mut res = vec![];
+            decoder.read_to_end(&mut res)?;
+            res
         } else {
-            Box::new(&mut f)
+            bytes
         };
 
-        let bytes = resp.bytes().await?.to_vec();
-        writer.write_all(&bytes).await?;
+        f.write_all(&decompressed).await?;
 
-        Ok(Packages::from_bytes_async(bytes).await?)
+        Ok(Packages::from_bytes_async(decompressed).await?)
     }
 }
 
@@ -128,16 +134,20 @@ impl FetchPackages {
 
         let mut f = std::fs::File::create(dir.join("Packages"))?;
 
-        let mut writer: Box<dyn std::io::Write + Unpin + Send> = if self.download_compress {
-            Box::new(xz2::write::XzDecoder::new(&mut f))
+        let bytes = resp.bytes()?.to_vec();
+        let decompressed = if self.download_compress {
+            let mut cursor = Cursor::new(&bytes);
+            let mut decoder = XzDecoder::new(&mut cursor);
+            let mut res = vec![];
+            decoder.read_to_end(&mut res)?;
+            res
         } else {
-            Box::new(&mut f)
+            bytes
         };
 
-        let bytes = resp.bytes()?.to_vec();
-        writer.write_all(&bytes)?;
+        f.write_all(&decompressed)?;
 
-        Ok(Packages::from_bytes(&bytes)?)
+        Ok(Packages::from_bytes(&decompressed)?)
     }
 }
 
