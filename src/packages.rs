@@ -176,6 +176,10 @@ impl Packages {
 
         Ok(Packages(packages))
     }
+
+    pub fn get_packages(&self) -> &Vec<Package> {
+        &self.0
+    }
 }
 
 fn get_packages(bytes: &[u8]) -> Result<Vec<Package>, FetchPackagesError> {
