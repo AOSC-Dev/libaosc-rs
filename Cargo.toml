@@ -9,17 +9,20 @@ license = "MIT"
 
 [dependencies]
 libc = "0.2"
-reqwest = { version = "0.12", optional = true }
+reqwest = { version = "0.12", features = ["rustls-tls"], optional = true }
 tokio = { version = "1.34", features = ["fs"], optional = true }
 thiserror = "2"
 deb822-lossless = { version = "0.2", features = ["derive"] }
 xz2 = { version = "0.1", optional = true }
+async-compression = { version = "0.4", features = ["xz", "futures-io"], optional = true }
+tokio-util = { version = "0.7", features = ["compat"], optional = true }
+futures = { version = "0.3", optional = true }
 
 [features]
 default = ["download", "blocking", "async"]
 download = ["dep:reqwest"]
 blocking = ["reqwest/blocking", "dep:xz2"]
-async = ["dep:tokio"]
+async = ["dep:tokio", "dep:tokio-util", "dep:futures", "dep:async-compression", "reqwest/stream"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }

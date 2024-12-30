@@ -1,13 +1,10 @@
 use deb822_lossless::{Deb822, FromDeb822, FromDeb822Paragraph, Paragraph, ParseError};
-use reqwest::Client;
 use std::{
-    io::{Cursor, Read, Write},
+    io::{self, Cursor, ErrorKind, Read, Write},
     path::{Path, PathBuf},
     str::FromStr,
 };
 use thiserror::Error;
-use tokio::io::AsyncWriteExt;
-use xz2::read::XzDecoder;
 
 const USER_AGENT: &str = "aosc";
 const DEFAULT_MIRROR: &str = "https://repo.aosc.io/debs";
@@ -15,7 +12,7 @@ const DEFAULT_MIRROR: &str = "https://repo.aosc.io/debs";
 #[cfg(feature = "async")]
 pub struct FetchPackagesAsync {
     download_compress: bool,
-    client: Client,
+    client: reqwest::Client,
     download_to: PathBuf,
     mirror_url: String,
 }
@@ -26,8 +23,6 @@ pub enum FetchPackagesError {
     IoError(#[from] std::io::Error),
     #[error(transparent)]
     ReqwestError(#[from] reqwest::Error),
-    #[error(transparent)]
-    Utf8(#[from] std::str::Utf8Error),
     #[error("Failed to parse string to deb822 format")]
     DebControl(ParseControlError),
     #[error(transparent)]
@@ -43,7 +38,10 @@ impl FetchPackagesAsync {
     ) -> Self {
         Self {
             download_compress,
-            client: Client::builder().user_agent(USER_AGENT).build().unwrap(),
+            client: reqwest::Client::builder()
+                .user_agent(USER_AGENT)
+                .build()
+                .unwrap(),
             download_to: download_to.as_ref().to_path_buf(),
             mirror_url: mirror_url.unwrap_or(DEFAULT_MIRROR).to_string(),
         }
@@ -67,6 +65,21 @@ impl FetchPackagesAsync {
             .await?
             .error_for_status()?;
 
+        let bytes_stream = futures::TryStreamExt::into_async_read(futures::TryStreamExt::map_err(
+            resp.bytes_stream(),
+            |e| io::Error::new(ErrorKind::Other, e),
+        ));
+
+        let reader: &mut (dyn futures::AsyncRead + Unpin + Send) = if self.download_compress {
+            &mut async_compression::futures::bufread::XzDecoder::new(futures::io::BufReader::new(
+                bytes_stream,
+            ))
+        } else {
+            &mut futures::io::BufReader::new(bytes_stream)
+        };
+
+        let mut reader = tokio_util::compat::FuturesAsyncReadCompatExt::compat(reader);
+
         let dir = &self.download_to;
 
         if !dir.exists() {
@@ -74,21 +87,11 @@ impl FetchPackagesAsync {
         }
 
         let mut f = tokio::fs::File::create(dir.join("Packages")).await?;
+        let mut buf = vec![];
+        tokio::io::AsyncReadExt::read_to_end(&mut reader, &mut buf).await?;
+        tokio::io::AsyncWriteExt::write_all(&mut f, &buf).await?;
 
-        let bytes = resp.bytes().await?.to_vec();
-        let decompressed = if self.download_compress {
-            let mut cursor = Cursor::new(&bytes);
-            let mut decoder = XzDecoder::new(&mut cursor);
-            let mut res = vec![];
-            decoder.read_to_end(&mut res)?;
-            res
-        } else {
-            bytes
-        };
-
-        f.write_all(&decompressed).await?;
-
-        (decompressed.as_slice())
+        (buf.as_slice())
             .try_into()
             .map_err(FetchPackagesError::DebControl)
     }
@@ -140,7 +143,7 @@ impl FetchPackages {
         let bytes = resp.bytes()?.to_vec();
         let decompressed = if self.download_compress {
             let mut cursor = Cursor::new(&bytes);
-            let mut decoder = XzDecoder::new(&mut cursor);
+            let mut decoder = xz2::read::XzDecoder::new(&mut cursor);
             let mut res = vec![];
             decoder.read_to_end(&mut res)?;
             res
