@@ -1,7 +1,4 @@
-use std::{
-    fs,
-    io::{BufRead, BufReader},
-};
+use std::fs;
 
 /// AOSC OS specific architecture mapping for ppc64
 #[cfg(target_arch = "powerpc64")]
@@ -45,10 +42,9 @@ pub enum AOSCBranch {
 }
 
 pub fn aosc_branch() -> Option<AOSCBranch> {
-    let f = fs::File::open("/etc/os-release").ok()?;
-    let lines = BufReader::new(f).lines();
-    for i in lines {
-        let line = i.ok()?;
+    let f = fs::read_to_string("/etc/os-release").ok()?;
+    let lines = f.lines();
+    for line in lines {
         if let Some(os) = line.strip_prefix("NAME=") {
             return match os {
                 "AOSC OS" => Some(AOSCBranch::Mainline),
