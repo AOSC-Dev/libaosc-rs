@@ -1,8 +1,9 @@
-use oma_debcontrol::Field;
+use deb822_lossless::{Deb822, FromDeb822, FromDeb822Paragraph, Paragraph, ParseError};
 use reqwest::Client;
 use std::{
     io::{Cursor, Read, Write},
     path::{Path, PathBuf},
+    str::FromStr,
 };
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
@@ -28,7 +29,7 @@ pub enum FetchPackagesError {
     #[error(transparent)]
     Utf8(#[from] std::str::Utf8Error),
     #[error("Failed to parse string to deb822 format")]
-    DebControl,
+    DebControl(ParseControlError),
     #[error(transparent)]
     JoinError(#[from] tokio::task::JoinError),
 }
@@ -87,7 +88,9 @@ impl FetchPackagesAsync {
 
         f.write_all(&decompressed).await?;
 
-        Ok(Packages::from_bytes_async(decompressed).await?)
+        (decompressed.as_slice())
+            .try_into()
+            .map_err(FetchPackagesError::DebControl)
     }
 }
 
@@ -147,105 +150,106 @@ impl FetchPackages {
 
         f.write_all(&decompressed)?;
 
-        Ok(Packages::from_bytes(&decompressed)?)
+        (decompressed.as_slice())
+            .try_into()
+            .map_err(FetchPackagesError::DebControl)
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, thiserror::Error)]
+pub enum ParseControlError {
+    #[error(transparent)]
+    Utf8(#[from] std::str::Utf8Error),
+    #[error("Failed convert to package from paragraph")]
+    Paragraph(String),
+    #[error(transparent)]
+    ParseError(#[from] ParseError),
+}
+
+pub struct Packages(pub Vec<Package>);
+
+impl FromStr for Packages {
+    type Err = ParseControlError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let pkgs: Deb822 = s.parse()?;
+        let mut res = vec![];
+        for para in pkgs.paragraphs() {
+            let pkg =
+                FromDeb822Paragraph::from_paragraph(&para).map_err(ParseControlError::Paragraph)?;
+            res.push(pkg);
+        }
+
+        Ok(Self(res))
+    }
+}
+
+impl TryFrom<&[u8]> for Packages {
+    type Error = ParseControlError;
+
+    fn try_from(input: &[u8]) -> Result<Self, Self::Error> {
+        let s = std::str::from_utf8(input)?;
+        let pkgs: Packages = s.parse()?;
+
+        Ok(pkgs)
+    }
+}
+
+impl FromStr for Package {
+    type Err = ParseControlError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let pkg: Paragraph = s.parse()?;
+        let pkg: Package =
+            FromDeb822Paragraph::from_paragraph(&pkg).map_err(ParseControlError::Paragraph)?;
+
+        Ok(pkg)
+    }
+}
+
+impl TryFrom<&[u8]> for Package {
+    type Error = ParseControlError;
+
+    fn try_from(input: &[u8]) -> Result<Self, Self::Error> {
+        let s = std::str::from_utf8(input)?;
+        let pkgs: Package = s.parse()?;
+
+        Ok(pkgs)
+    }
+}
+
+#[derive(Debug, Clone, FromDeb822)]
 pub struct Package {
+    #[deb822(field = "Package")]
     pub package: String,
+    #[deb822(field = "Architecture")]
     pub architecture: String,
+    #[deb822(field = "Version")]
     pub version: String,
+    #[deb822(field = "Section")]
     pub section: String,
+    #[deb822(field = "Installed-Size")]
     pub install_size: u64,
+    #[deb822(field = "Maintainer")]
     pub maintainer: String,
+    #[deb822(field = "Filename")]
     pub filename: String,
+    #[deb822(field = "Size")]
     pub size: u64,
+    #[deb822(field = "SHA256")]
     pub sha256: String,
+    #[deb822(field = "Description")]
     pub description: String,
+    #[deb822(field = "Depends")]
     pub depends: Option<String>,
+    #[deb822(field = "Provides")]
     pub provides: Option<String>,
+    #[deb822(field = "Conflicts")]
     pub conflicts: Option<String>,
+    #[deb822(field = "Replaces")]
     pub replaces: Option<String>,
+    #[deb822(field = "Breaks")]
     pub breaks: Option<String>,
-}
-
-pub struct Packages(Vec<Package>);
-
-impl Packages {
-    #[cfg(feature = "async")]
-    pub async fn from_bytes_async(bytes: Vec<u8>) -> Result<Self, FetchPackagesError> {
-        let res = tokio::task::spawn_blocking(move || get_packages(&bytes)).await??;
-
-        Ok(Packages(res))
-    }
-
-    #[cfg(feature = "blocking")]
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, FetchPackagesError> {
-        let packages = get_packages(bytes)?;
-
-        Ok(Packages(packages))
-    }
-
-    pub fn get_packages(&self) -> &Vec<Package> {
-        &self.0
-    }
-}
-
-fn get_packages(bytes: &[u8]) -> Result<Vec<Package>, FetchPackagesError> {
-    let input = std::str::from_utf8(bytes)?;
-    let mut res = vec![];
-    let parse_release =
-        oma_debcontrol::parse_str(input).map_err(|_| FetchPackagesError::DebControl)?;
-
-    for i in parse_release {
-        let fields = i.fields;
-        let package = find_value(&fields, "Package").unwrap_or_default();
-        let arch = find_value(&fields, "Architecture").unwrap_or_default();
-        let version = find_value(&fields, "Version").unwrap_or_default();
-        let section = find_value(&fields, "Section").unwrap_or_default();
-        let install_size = find_value(&fields, "Install-Size")
-            .and_then(|x| x.parse::<u64>().ok())
-            .unwrap_or(0);
-
-        let maintainer = find_value(&fields, "Maintainer").unwrap_or_default();
-        let filename = find_value(&fields, "Filename").unwrap_or_default();
-        let size = find_value(&fields, "Size")
-            .and_then(|x| x.parse::<u64>().ok())
-            .unwrap_or(0);
-
-        let sha256 = find_value(&fields, "SHA256").unwrap_or_default();
-        let description = find_value(&fields, "Description").unwrap_or_default();
-        let depends = find_value(&fields, "Depends");
-        let provides = find_value(&fields, "Provides");
-        let conflicts = find_value(&fields, "Conflicts");
-        let replaces = find_value(&fields, "Replaces");
-        let breaks = find_value(&fields, "Breaks");
-
-        res.push(Package {
-            package,
-            architecture: arch,
-            version,
-            section,
-            install_size,
-            maintainer,
-            filename,
-            size,
-            sha256,
-            description,
-            depends,
-            provides,
-            conflicts,
-            replaces,
-            breaks,
-        });
-    }
-    Ok(res)
-}
-
-fn find_value<'a>(fields: &'a [Field<'a>], key: &'a str) -> Option<String> {
-    fields
-        .into_iter()
-        .find(|x| x.name == key)
-        .map(|x| x.value.to_string())
+    #[deb822(field = "X-AOSC-Features")]
+    pub featres: Option<String>,
 }
