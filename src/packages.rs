@@ -1,12 +1,18 @@
 use deb822_lossless::{Deb822, FromDeb822, FromDeb822Paragraph, Paragraph, ParseError};
-use std::{
-    io::{self, Cursor, ErrorKind, Read, Write},
-    path::{Path, PathBuf},
-    str::FromStr,
-};
+
+#[cfg(feature = "download")]
+use std::io::{self, Cursor, ErrorKind, Read, Write};
+
+#[cfg(feature = "download")]
+use std::path::{Path, PathBuf};
+
+use std::str::FromStr;
 use thiserror::Error;
 
+#[cfg(feature = "download")]
 const USER_AGENT: &str = "aosc";
+
+#[cfg(feature = "download")]
 const DEFAULT_MIRROR: &str = "https://repo.aosc.io/debs";
 
 #[cfg(feature = "async")]
@@ -21,10 +27,12 @@ pub struct FetchPackagesAsync {
 pub enum FetchPackagesError {
     #[error(transparent)]
     IoError(#[from] std::io::Error),
+    #[cfg(feature = "download")]
     #[error(transparent)]
     ReqwestError(#[from] reqwest::Error),
     #[error("Failed to parse string to deb822 format")]
     DebControl(ParseControlError),
+    #[cfg(feature = "async")]
     #[error(transparent)]
     JoinError(#[from] tokio::task::JoinError),
 }
