@@ -1,7 +1,7 @@
 use deb822_lossless::{Deb822, FromDeb822, FromDeb822Paragraph, Paragraph, ParseError};
 
 #[cfg(feature = "download")]
-use std::io::{self, Cursor, ErrorKind, Read, Write};
+use std::io::{self, ErrorKind, Read, Write};
 
 #[cfg(feature = "download")]
 use std::path::{Path, PathBuf};
@@ -10,7 +10,7 @@ use std::str::FromStr;
 use thiserror::Error;
 
 #[cfg(feature = "download")]
-const USER_AGENT: &str = "aosc";
+const USER_AGENT: &str = "oma/1.14.514";
 
 #[cfg(feature = "download")]
 const DEFAULT_MIRROR: &str = "https://repo.aosc.io/debs";
@@ -138,7 +138,7 @@ impl FetchPackages {
             if self.download_compress { ".xz" } else { "" }
         );
 
-        let resp = self.client.get(download_url).send()?.error_for_status()?;
+        let mut resp = self.client.get(download_url).send()?.error_for_status()?;
 
         let dir = &self.download_to;
 
@@ -148,20 +148,18 @@ impl FetchPackages {
 
         let mut f = std::fs::File::create(dir.join("Packages"))?;
 
-        let bytes = resp.bytes()?.to_vec();
-        let decompressed = if self.download_compress {
-            let mut cursor = Cursor::new(&bytes);
-            let mut decoder = xz2::read::XzDecoder::new(&mut cursor);
-            let mut res = vec![];
-            decoder.read_to_end(&mut res)?;
-            res
+        let mut reader: Box<dyn Read> = if self.download_compress {
+            Box::new(liblzma::read::XzDecoder::new(&mut resp))
         } else {
-            bytes
+            Box::new(resp)
         };
 
-        f.write_all(&decompressed)?;
+        let mut res = vec![];
+        reader.read_to_end(&mut res)?;
 
-        (decompressed.as_slice())
+        f.write_all(&res)?;
+
+        (res.as_slice())
             .try_into()
             .map_err(FetchPackagesError::DebControl)
     }
