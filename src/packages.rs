@@ -1,21 +1,17 @@
 use deb822_lossless::{Deb822, FromDeb822, FromDeb822Paragraph, Paragraph, ParseError};
 
-#[cfg(feature = "download")]
-use std::io::{self, ErrorKind, Read, Write};
-
-#[cfg(feature = "download")]
+#[cfg(any(feature = "download-async", feature = "download-blocking"))]
 use std::path::{Path, PathBuf};
 
 use std::str::FromStr;
-use thiserror::Error;
 
-#[cfg(feature = "download")]
+#[cfg(any(feature = "download-async", feature = "download-blocking"))]
 const USER_AGENT: &str = "oma/1.14.514";
 
-#[cfg(feature = "download")]
+#[cfg(any(feature = "download-async", feature = "download-blocking"))]
 const DEFAULT_MIRROR: &str = "https://repo.aosc.io/debs";
 
-#[cfg(feature = "async")]
+#[cfg(feature = "download-async")]
 pub struct FetchPackagesAsync {
     download_compress: bool,
     client: reqwest::Client,
@@ -23,21 +19,21 @@ pub struct FetchPackagesAsync {
     mirror_url: String,
 }
 
-#[derive(Debug, Error)]
+#[cfg(any(feature = "download-async", feature = "download-blocking"))]
+#[derive(Debug, thiserror::Error)]
 pub enum FetchPackagesError {
     #[error(transparent)]
     IoError(#[from] std::io::Error),
-    #[cfg(feature = "download")]
     #[error(transparent)]
     ReqwestError(#[from] reqwest::Error),
     #[error("Failed to parse string to deb822 format")]
     DebControl(ParseControlError),
-    #[cfg(feature = "async")]
+    #[cfg(feature = "download-async")]
     #[error(transparent)]
     JoinError(#[from] tokio::task::JoinError),
 }
 
-#[cfg(feature = "async")]
+#[cfg(feature = "download-async")]
 impl FetchPackagesAsync {
     pub fn new<P: AsRef<Path>>(
         download_compress: bool,
@@ -75,7 +71,7 @@ impl FetchPackagesAsync {
 
         let bytes_stream = futures::TryStreamExt::into_async_read(futures::TryStreamExt::map_err(
             resp.bytes_stream(),
-            |e| io::Error::new(ErrorKind::Other, e),
+            |e| std::io::Error::new(std::io::ErrorKind::Other, e),
         ));
 
         let reader: &mut (dyn futures::AsyncRead + Unpin + Send) = if self.download_compress {
@@ -105,7 +101,7 @@ impl FetchPackagesAsync {
     }
 }
 
-#[cfg(feature = "blocking")]
+#[cfg(feature = "download-blocking")]
 pub struct FetchPackages {
     download_compress: bool,
     client: reqwest::blocking::Client,
@@ -113,7 +109,7 @@ pub struct FetchPackages {
     mirror_url: String,
 }
 
-#[cfg(feature = "blocking")]
+#[cfg(feature = "download-blocking")]
 impl FetchPackages {
     pub fn new<P: AsRef<Path>>(
         download_compress: bool,
@@ -148,7 +144,7 @@ impl FetchPackages {
 
         let mut f = std::fs::File::create(dir.join("Packages"))?;
 
-        let mut reader: Box<dyn Read> = if self.download_compress {
+        let mut reader: Box<dyn std::io::Read> = if self.download_compress {
             Box::new(liblzma::read::XzDecoder::new(&mut resp))
         } else {
             Box::new(resp)
@@ -157,7 +153,7 @@ impl FetchPackages {
         let mut res = vec![];
         reader.read_to_end(&mut res)?;
 
-        f.write_all(&res)?;
+        std::io::Write::write_all(&mut f, &res)?;
 
         (res.as_slice())
             .try_into()
