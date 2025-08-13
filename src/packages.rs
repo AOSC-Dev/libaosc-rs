@@ -71,7 +71,7 @@ impl FetchPackagesAsync {
 
         let bytes_stream = futures::TryStreamExt::into_async_read(futures::TryStreamExt::map_err(
             resp.bytes_stream(),
-            |e| std::io::Error::new(std::io::ErrorKind::Other, e),
+            std::io::Error::other,
         ));
 
         let reader: &mut (dyn futures::AsyncRead + Unpin + Send) = if self.download_compress {
