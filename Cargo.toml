@@ -12,7 +12,7 @@ libc = { version = "0.2", optional = true }
 reqwest = { version = "0.12", features = ["rustls-tls"], optional = true }
 tokio = { version = "1.34", features = ["fs"], optional = true }
 thiserror = "2"
-deb822-lossless = { version = "0.2", features = ["derive"], optional = true }
+deb822-fast = { version = "0.2", features = ["derive"], optional = true }
 liblzma = { version = "0.4", optional = true }
 async-compression = { version = "0.4", features = ["xz", "futures-io"], optional = true }
 tokio-util = { version = "0.7", features = ["compat"], optional = true }
@@ -22,7 +22,7 @@ futures = { version = "0.3", optional = true }
 default = ["download-blocking", "download-async", "parse-pacakges-manifest", "arch"]
 download-blocking = ["parse-pacakges-manifest", "dep:reqwest", "reqwest/blocking", "dep:liblzma"]
 download-async = ["parse-pacakges-manifest", "dep:tokio", "dep:tokio-util", "dep:futures", "dep:async-compression", "reqwest/stream"]
-parse-pacakges-manifest = ["dep:deb822-lossless"]
+parse-pacakges-manifest = ["dep:deb822-fast"]
 arch = ["dep:libc"]
 
 [dev-dependencies]

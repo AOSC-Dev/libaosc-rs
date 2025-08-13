@@ -1,4 +1,4 @@
-use deb822_lossless::{Deb822, FromDeb822, FromDeb822Paragraph, Paragraph, ParseError};
+use deb822_fast::{FromDeb822, FromDeb822Paragraph, Paragraph};
 
 #[cfg(any(feature = "download-async", feature = "download-blocking"))]
 use std::path::{Path, PathBuf};
@@ -167,8 +167,8 @@ pub enum ParseControlError {
     Utf8(#[from] std::str::Utf8Error),
     #[error("Failed convert to package from paragraph")]
     Paragraph(String),
-    #[error(transparent)]
-    ParseError(#[from] ParseError),
+    #[error("Failed to parse Packages manifest file: {0}")]
+    ParseError(String),
 }
 
 pub struct Packages(pub Vec<Package>);
@@ -177,15 +177,16 @@ impl FromStr for Packages {
     type Err = ParseControlError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let pkgs: Deb822 = s.parse()?;
-        let mut res = vec![];
-        for para in pkgs.paragraphs() {
-            let pkg =
-                FromDeb822Paragraph::from_paragraph(&para).map_err(ParseControlError::Paragraph)?;
-            res.push(pkg);
-        }
+        let deb822: deb822_fast::Deb822 = s
+            .parse()
+            .map_err(|e: deb822_fast::Error| ParseControlError::ParseError(e.to_string()))?;
 
-        Ok(Self(res))
+        let pkgs = deb822
+            .into_iter()
+            .map(|p| Package::from_paragraph(&p).map_err(ParseControlError::Paragraph))
+            .collect::<Result<Vec<_>, Self::Err>>()?;
+
+        Ok(Self(pkgs))
     }
 }
 
@@ -204,7 +205,10 @@ impl FromStr for Package {
     type Err = ParseControlError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let pkg: Paragraph = s.parse()?;
+        let pkg: Paragraph = s
+            .parse()
+            .map_err(|e: deb822_fast::Error| ParseControlError::ParseError(e.to_string()))?;
+
         let pkg: Package =
             FromDeb822Paragraph::from_paragraph(&pkg).map_err(ParseControlError::Paragraph)?;
 
