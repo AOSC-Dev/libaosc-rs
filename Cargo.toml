@@ -10,7 +10,7 @@ license = "MIT"
 [dependencies]
 libc = { version = "0.2", optional = true }
 reqwest = { version = "0.13.5", optional = true, default-features = false }
-tokio = { version = "1.34", features = ["fs"], optional = true }
+tokio = { version = "1.34", features = ["fs", "io-util"], optional = true }
 thiserror = "2"
 deb822-fast = { version = "0.2", features = ["derive"], optional = true }
 liblzma = { version = "0.4", optional = true }
@@ -20,6 +20,11 @@ async-compression = { version = "0.4", features = [
 ], optional = true }
 tokio-util = { version = "0.7", features = ["compat"], optional = true }
 futures = { version = "0.3", optional = true }
+rustls = { version = "0.23", default-features = false, features = [
+    "ring",
+    "std",
+    "tls12",
+], optional = true }
 
 [features]
 default = [
@@ -32,14 +37,19 @@ download-blocking = [
     "parse-pacakges-manifest",
     "dep:reqwest",
     "reqwest/blocking",
+    "reqwest/rustls-no-provider",
+    "dep:rustls",
     "dep:liblzma",
 ]
 download-async = [
+    "reqwest/stream",
+    "reqwest/rustls-no-provider",
     "parse-pacakges-manifest",
     "dep:tokio",
     "dep:tokio-util",
     "dep:futures",
     "dep:async-compression",
+    "dep:rustls",
 ]
 parse-pacakges-manifest = ["dep:deb822-fast"]
 arch = ["dep:libc"]
